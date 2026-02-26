@@ -1,8 +1,12 @@
+from matplotlib.pyplot import clf
 import numpy as np
-import ModeloXGBoost
+import xgboost as xgb
+import shap
 import LecturaDatos
 import pandas as pd
-
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_auc_score
+import builtins
 
 def set_model(datos_limpios, target_col: str, threshold: float = 0.05):
     # Aquí puedes configurar tu modelo XGBoost con los hiperparámetros deseados
@@ -29,7 +33,7 @@ def set_model(datos_limpios, target_col: str, threshold: float = 0.05):
         'missing': np.nan         # Instrucción explícita de cómo leer NaNs
     }
 
-    model = ModeloXGBoost.XGBClassifier(
+    model = xgb.XGBClassifier(
         n_estimators=100,
         max_depth=5,
         learning_rate=0.1,
@@ -43,7 +47,7 @@ def set_model(datos_limpios, target_col: str, threshold: float = 0.05):
 
 
 def training_skf(n_splits: int, shuffle: bool, random_state: int, model, X, y):
-    skf = ModeloXGBoost.StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
     
     auc_scores = []
     shap_values_list = []
@@ -56,23 +60,36 @@ def training_skf(n_splits: int, shuffle: bool, random_state: int, model, X, y):
         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
         
         # Entrenar modelo
-        model = ModeloXGBoost.xgb.XGBClassifier(**model)
-        model.fit(X_train, y_train)
+        clf = xgb.XGBClassifier(**model)
+        clf.fit(X_train, y_train)
         
         # Predicción
-        y_pred_proba = model.predict_proba(X_test)[:, 1]
+        y_pred_proba = clf.predict_proba(X_test)[:, 1]
         
         # Evaluar AUC en este pliegue
-        auc = ModeloXGBoost.roc_auc_score(y_test, y_pred_proba)
+        auc = roc_auc_score(y_test, y_pred_proba)
         auc_scores.append(auc)
         
         # --- EXPLICABILIDAD (SHAP) ---
-        # Calculamos SHAP values para el set de prueba de este pliegue
-        explainer = ModeloXGBoost.shap.TreeExplainer(model)
+        # Guardamos la función float original
+        original_float = builtins.float
+        
+        # Creamos un float parcheado que quita los corchetes si los detecta
+        def patched_float(x):
+            if isinstance(x, str) and x.startswith('[') and x.endswith(']'):
+                return original_float(x[1:-1]) # Extrae lo de adentro: '[0.5]' -> '0.5'
+            return original_float(x)
+            
+        try:
+            # Reemplazamos temporalmente float() en todo Python
+            builtins.float = patched_float
+            explainer = shap.TreeExplainer(clf)
+        finally:
+            # PASE LO QUE PASE, devolvemos a Python su float() original inmediatamente
+            builtins.float = original_float
+            
         shap_values = explainer.shap_values(X_test)
         
-        # Guardamos resultados para análisis global
         shap_values_list.append(shap_values)
-        test_indices_list.extend(test_index)
-
+        test_indices_list.append(test_index)
     return auc_scores, shap_values_list, test_indices_list
