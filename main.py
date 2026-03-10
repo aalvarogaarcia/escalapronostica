@@ -269,7 +269,14 @@ with tab3:
                         resultados.append(row_dict)
                         
                         # Alfabético, pero poniendo "Otros" al final si existe
-                        categorias = sorted([c for c in df_desc[col].unique() if pd.notna(c)])
+                        valores_unicos =[c for c in df_desc[col].unique() if pd.notna(c)]
+                        try:
+                            categorias = sorted(valores_unicos)
+                        except:
+                            st.warning(f"⚠️ La columna '{col}' contiene tipos de datos mezclados (texto y números). Se han convertido a texto para poder mostrarlos.")
+                            categorias = sorted([str(c) for c in valores_unicos])
+                            
+
                         if 'Otros' in categorias:
                             categorias.remove('Otros')
                             categorias.append('Otros')
